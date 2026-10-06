@@ -1,0 +1,9 @@
+reportlab
+groq
+pypdf
+pydantic
+python-dotenv
+langgraph
+fastapi
+uvicorn
+python-multipart

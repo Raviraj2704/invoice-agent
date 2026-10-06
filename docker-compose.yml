@@ -1,0 +1,23 @@
+# Setup: put GROQ_API_KEY and REVIEW_PASSWORD in .env, and run generate_data.py once on your machine.
+#   docker compose up --build                  -> review screen at http://localhost:8000
+#   docker compose run --rm agent              -> process all invoices with the agent
+services:
+  review:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      APP_ENV: production   # refuses to start without REVIEW_PASSWORD
+    volumes:
+      - ./invoice_agent.db:/app/invoice_agent.db
+    restart: unless-stopped
+
+  agent:
+    build: .
+    profiles: ["batch"]
+    command: ["python", "agent.py"]
+    env_file: .env
+    volumes:
+      - ./invoice_agent.db:/app/invoice_agent.db
+      - ./data:/app/data
