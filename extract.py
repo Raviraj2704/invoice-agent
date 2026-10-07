@@ -128,11 +128,32 @@ def extract_invoice(client, text):
 def arithmetic_warnings(inv):
     """Plain-code sanity checks. These are warnings, not errors."""
     warnings = []
-    line_sum = round(sum(l.quantity * l.unit_price for l in inv.lines), 2)
-    if abs(line_sum - inv.subtotal) > 1:
-        warnings.append(f"line items sum to {line_sum} but subtotal is {inv.subtotal}")
-    if abs(inv.subtotal + inv.tax - inv.total) > 1:
-        warnings.append(f"subtotal + tax = {round(inv.subtotal + inv.tax, 2)} but total is {inv.total}")
+    
+    # 1. Safely extract properties whether inv is a dict or an object
+    lines = inv.get("lines", []) if isinstance(inv, dict) else getattr(inv, "lines", [])
+    subtotal = inv.get("subtotal", 0.0) if isinstance(inv, dict) else getattr(inv, "subtotal", 0.0)
+    tax = inv.get("tax", 0.0) if isinstance(inv, dict) else getattr(inv, "tax", 0.0)
+    total = inv.get("total", 0.0) if isinstance(inv, dict) else getattr(inv, "total", 0.0)
+    
+    # 2. Safely calculate line sum whether items are dicts or objects
+    line_sum = 0
+    for item in lines:
+        if isinstance(item, dict):
+            q = item.get("quantity", 0)
+            p = item.get("unit_price", 0.0)
+        else:
+            q = getattr(item, "quantity", 0)
+            p = getattr(item, "unit_price", 0.0)
+        line_sum += q * p
+        
+    line_sum = round(line_sum, 2)
+    
+    # 3. Apply validation logic
+    if line_sum != subtotal:
+        warnings.append("arithmetic_mismatch")
+    elif round(subtotal + tax, 2) != total:
+        warnings.append("arithmetic_mismatch")
+        
     return warnings
 
 
@@ -144,10 +165,10 @@ def load_labels():
 def score(inv, label):
     """Field-by-field match against the ground truth."""
     return {
-        "invoice_number": inv.invoice_number == label["invoice_number"],
-        "vendor": inv.vendor == label["vendor"],
-        "po_number": inv.po_number == label["po_number"],
-        "total": abs(inv.total - float(label["total"])) < 0.01,
+        "invoice_number": inv["invoice_number"] == label["invoice_number"],
+        "vendor": inv["vendor"] == label["vendor"],
+        "po_number": inv["po_number"] == label["po_number"],
+        "total": abs(inv["total"] - float(label["total"])) < 0.01,
     }
 
 
