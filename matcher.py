@@ -18,6 +18,7 @@ HIGH_VALUE_LIMIT = 100000
 PRICE_TOLERANCE = 1.0
 REJECT_FLAGS = {"duplicate", "missing_po"}
 
+from extract import arithmetic_warnings
 
 def money(x):
     return f"Rs. {x:,.2f}"
@@ -84,6 +85,13 @@ def match_invoice(conn, inv):
             if line["quantity"] > got:
                 flags.append("over_billed")
                 notes.append(f"'{name}': billed {line['quantity']} but only {got} delivered.")
+
+            # Check arithmetic: line items must sum to subtotal, and subtotal + tax must equal total
+            warnings = arithmetic_warnings(inv)
+            if warnings:
+               flags.append("arithmetic_mismatch")
+            for w in warnings:
+               notes.append(f"Arithmetic issue: {w}")
 
     if inv["total"] > HIGH_VALUE_LIMIT:
         flags.append("high_value")

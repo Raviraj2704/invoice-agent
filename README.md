@@ -50,6 +50,7 @@ flowchart LR
 | Item not on the PO, or unknown vendor | review |
 | Total above Rs. 1,00,000 | review (`high_value`) |
 | None of the above | approve |
+| Arithmetic mismatch | Line items don't sum to subtotal, or subtotal + tax ≠ total | review |
 
 ## Results
 

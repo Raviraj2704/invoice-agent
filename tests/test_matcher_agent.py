@@ -13,12 +13,14 @@ def test_clean_invoice_is_approved(conn, make_invoice):
 
 
 def test_price_within_tolerance_is_approved(conn, make_invoice):
-    inv = make_invoice(lines=[{"item": "Mouse", "quantity": 5, "unit_price": 500.5}])
+    # 5 * 500.5 = 2502.5. Plus default 450 tax = 2952.5
+    inv = make_invoice(lines=[{"item": "Mouse", "quantity": 5, "unit_price": 500.5}], subtotal=2502.5, total=2952.5)
     assert match_invoice(conn, inv)["outcome"] == "approve"
 
 
 def test_wrong_amount_goes_to_review(conn, make_invoice):
-    inv = make_invoice(lines=[{"item": "Mouse", "quantity": 5, "unit_price": 600.0}])
+    # 5 * 600 = 3000. Plus default 450 tax = 3450
+    inv = make_invoice(lines=[{"item": "Mouse", "quantity": 5, "unit_price": 600.0}], subtotal=3000.0, total=3450.0)
     result = match_invoice(conn, inv)
     assert result["outcome"] == "review"
     assert result["flags"] == ["wrong_amount"]
@@ -32,7 +34,8 @@ def test_over_billed_quantity_goes_to_review(conn, make_invoice):
 
 
 def test_billing_exactly_what_was_delivered_is_fine(conn, make_invoice):
-    inv = make_invoice(lines=[{"item": "Laptop", "quantity": 1, "unit_price": 50000.0}], total=59000.0)
+    # 1 * 50000 = 50000. Setting tax to 9000 explicitly to match the 59000 total
+    inv = make_invoice(lines=[{"item": "Laptop", "quantity": 1, "unit_price": 50000.0}], subtotal=50000.0, tax=9000.0, total=59000.0)
     assert match_invoice(conn, inv)["outcome"] == "approve"
 
 
@@ -67,9 +70,30 @@ def test_item_not_on_po_goes_to_review(conn, make_invoice):
     assert "item_not_on_po" in result["flags"]
 
 
+def test_arithmetic_mismatch_goes_to_review(conn, make_invoice):
+    r = match_invoice(conn, make_invoice(subtotal=9999.0))
+    assert r["outcome"] == "review" and "arithmetic_mismatch" in r["flags"]
+
+
+def test_correct_arithmetic_is_ok(conn, make_invoice):
+    r = match_invoice(conn, make_invoice())
+    assert "arithmetic_mismatch" not in r["flags"]
+
+
 def test_high_value_needs_review_but_limit_itself_is_allowed(conn, make_invoice):
-    assert match_invoice(conn, make_invoice(total=100000.0))["outcome"] == "approve"
-    result = match_invoice(conn, make_invoice(total=100000.01))
+    # 2 Laptops at 50,000 each = 100,000. Valid math and valid PO price!
+    inv1 = make_invoice(
+        lines=[{"item": "Laptop", "quantity": 2, "unit_price": 50000.0}], 
+        subtotal=100000.0, tax=0.0, total=100000.0
+    )
+    assert match_invoice(conn, inv1)["outcome"] == "approve"
+    
+    # Adding just 0.01 in tax pushes the total over the 100k limit to trigger high_value
+    inv2 = make_invoice(
+        lines=[{"item": "Laptop", "quantity": 2, "unit_price": 50000.0}], 
+        subtotal=100000.0, tax=0.01, total=100000.01
+    )
+    result = match_invoice(conn, inv2)
     assert result["outcome"] == "review"
     assert result["flags"] == ["high_value"]
 
@@ -102,7 +126,9 @@ def test_approved_invoice_is_decided_by_agent(conn, make_invoice):
 
 
 def test_review_invoice_waits_for_a_human(conn, make_invoice):
-    run(conn, make_invoice(lines=[{"item": "Mouse", "quantity": 5, "unit_price": 700.0}]))
+    # 5 * 700 = 3500. Plus default 450 tax = 3950
+    inv = make_invoice(lines=[{"item": "Mouse", "quantity": 5, "unit_price": 700.0}], subtotal=3500.0, total=3950.0)
+    run(conn, inv)
     assert decisions(conn) == [("review", "pending_human", "wrong_amount")]
 
 
