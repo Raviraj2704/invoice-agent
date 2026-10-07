@@ -94,6 +94,8 @@ pytest                       # 41 automated tests (no API key needed)
 With Docker: `docker compose up --build` for the review screen, and `docker compose run --rm agent` to process invoices.
 Run `generate_data.py` once on your machine first, because the containers use that database file.
 
+**Upload and check a single invoice:** Open `http://127.0.0.1:8000/upload-page` and drag a PDF. The agent reads, matches, and shows the decision instantly. Optionally draft a vendor email.
+
 ## Project layout
 
 | File | Purpose |

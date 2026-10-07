@@ -17,6 +17,9 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import UploadFile, File
+from pathlib import Path
+import tempfile
 
 from extract import ROOT
 from vendor_email import draft_vendor_email
@@ -113,6 +116,94 @@ def get_client():
     from groq import Groq
     return Groq(api_key=key)
 
+@app.post("/upload", response_class=HTMLResponse, dependencies=AUTH)
+async def upload_invoice(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".pdf"):
+        return page("Upload", "<div class='card'><h2>Error</h2>Upload a PDF file only.</div><a href='/'>Back</a>")
+    
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        from extract import read_pdf_text, extract_invoice
+        from matcher import match_invoice
+        from vendor_email import draft_vendor_email
+        
+        client = get_client()
+        text = read_pdf_text(tmp_path)
+        inv, attempts = extract_invoice(client, text)
+        inv_dict = inv.model_dump(mode="json")
+        
+        conn = db()
+        match_result = match_invoice(conn, inv_dict)
+        email_draft = draft_vendor_email(
+            client, inv_dict["vendor"], "", inv_dict["invoice_number"],
+            inv_dict["po_number"], match_result["explanation"]
+        )
+        conn.close()
+        
+        Path(tmp_path).unlink()  # clean up temp file
+        
+        body = (
+            f"<a href='/'>&larr; Back</a>"
+            f"<h1>Invoice {esc(inv_dict['invoice_number'])}</h1>"
+            f"<div class='card'>"
+            f"<b>Vendor:</b> {esc(inv_dict['vendor'])}<br>"
+            f"<b>PO:</b> {esc(inv_dict['po_number'])}<br>"
+            f"<b>Total:</b> Rs. {inv_dict['total']:,.2f}<br>"
+            f"</div>"
+            f"<div class='card'><h2>Agent decision</h2>"
+            f"<b>Outcome:</b> {esc(match_result['outcome'])} {flag_tags(match_result['flags'])}<br>"
+            f"<p>{esc(match_result['explanation'])}</p>"
+            f"</div>"
+            f"<div class='card'><h2>Vendor email draft</h2>"
+            f"<b>To:</b> {esc(email_draft.get('to', 'not provided'))}<br>"
+            f"<b>Subject:</b> {esc(email_draft.get('subject'))}<br>"
+            f"<pre>{esc(email_draft.get('body'))}</pre>"
+            f"<small>Source: {esc(email_draft.get('source'))}</small></div>"
+        )
+        return page(f"Invoice {inv_dict['invoice_number']}", body)
+    
+    except Exception as err:
+        return page("Upload Error", f"<div class='card'><h2>Error</h2><p>{esc(str(err))}</p></div><a href='/'>Back</a>")
+
+
+@app.get("/upload-page", response_class=HTMLResponse, dependencies=AUTH)
+def upload_page_view():
+    body = (
+        "<a href='/'>&larr; Back to queue</a>"
+        "<h1>Upload an invoice</h1>"
+        "<form id='upload-form' enctype='multipart/form-data'>"
+        "<div class='card'>"
+        "<div id='drop-zone' style='border: 2px dashed #2563eb; border-radius: 8px; padding: 40px; "
+        "text-align: center; cursor: pointer; background: #f0f9ff;'>"
+        "<p><b>Drag a PDF here, or click to select</b></p>"
+        "<input type='file' id='file-input' name='file' accept='.pdf' style='display: none;'>"
+        "</div>"
+        "<p style='text-align: center; margin-top: 10px; font-size: 12px; color: #666;'>PDF only, up to 10 MB</p>"
+        "</div>"
+        "</form>"
+        "<script>"
+        "const dropZone = document.getElementById('drop-zone');"
+        "const fileInput = document.getElementById('file-input');"
+        "const form = document.getElementById('upload-form');"
+        "dropZone.addEventListener('click', () => fileInput.click());"
+        "dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.background = '#dbeafe'; });"
+        "dropZone.addEventListener('dragleave', () => { dropZone.style.background = '#f0f9ff'; });"
+        "dropZone.addEventListener('drop', e => { e.preventDefault(); fileInput.files = e.dataTransfer.files; submit(); });"
+        "fileInput.addEventListener('change', submit);"
+        "function submit() {"
+        "  if (!fileInput.files.length) return;"
+        "  const data = new FormData();"
+        "  data.append('file', fileInput.files[0]);"
+        "  fetch('/upload', { method: 'POST', body: data }).then(r => r.text()).then(html => document.write(html));"
+        "}"
+        "</script>"
+    )
+    return page("Upload invoice", body)
+
 
 @app.get("/health")
 def health():
@@ -140,6 +231,7 @@ def home():
         f"<div class='stats'><span>Auto-approved: {auto_ok}</span><span>Auto-rejected: {auto_reject}</span>"
         f"<span>Decided by humans: {by_humans}</span><span>Waiting: {len(pending)}</span></div>"
         "<table><tr><th>Invoice</th><th>Vendor</th><th>Total</th><th>Flags</th></tr>" + rows + "</table>"
+         "<a href='/upload-page' style='background: #16a34a; color: white; padding: 8px 14px; border-radius: 6px; text-decoration: none; display: inline-block; margin-bottom: 16px;'>Upload new invoice</a>"
     )
     return page("Invoice review queue", body)
 
